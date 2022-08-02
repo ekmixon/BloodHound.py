@@ -51,13 +51,13 @@ class ADDC(ADComputer):
         # GC LDAP connection
         self.gcldap = None
         # Initialize GUID map
-        self.objecttype_guid_map = dict()
+        self.objecttype_guid_map = {}
 
     def ldap_connect(self, protocol='ldap', resolver=False):
         """
         Connect to the LDAP service
         """
-        logging.info('Connecting to LDAP server: %s' % self.hostname)
+        logging.info(f'Connecting to LDAP server: {self.hostname}')
 
         # Convert the hostname to an IP, this prevents ldap3 from doing it
         # which doesn't use our custom nameservers
@@ -86,12 +86,12 @@ class ADDC(ADComputer):
                 initial_server = self.ad.gcs()[0]
             except IndexError:
                 logging.error('Could not find a Global Catalog in this domain!'\
-                              ' Resolving will be unreliable in forests with multiple domains')
+                                  ' Resolving will be unreliable in forests with multiple domains')
                 return False
         try:
             # Convert the hostname to an IP, this prevents ldap3 from doing it
             # which doesn't use our custom nameservers
-            logging.info('Connecting to GC LDAP server: %s' % initial_server)
+            logging.info(f'Connecting to GC LDAP server: {initial_server}')
             q = self.ad.dnsresolver.query(initial_server, tcp=self.ad.dns_tcp)
             for r in q:
                 ip = r.address
@@ -103,7 +103,7 @@ class ADDC(ADComputer):
                 try:
                     # Convert the hostname to an IP, this prevents ldap3 from doing it
                     # which doesn't use our custom nameservers
-                    logging.info('Connecting to GC LDAP server: %s' % server)
+                    logging.info(f'Connecting to GC LDAP server: {server}')
                     q = self.ad.dnsresolver.query(server, tcp=self.ad.dns_tcp)
                     for r in q:
                         ip = r.address
@@ -125,12 +125,7 @@ class ADDC(ADComputer):
             search_base = self.ad.baseDN
         if attributes is None or attributes == []:
             attributes = ALL_ATTRIBUTES
-        if query_sd:
-            # Set SD flags to only query for DACL and Owner
-            controls = security_descriptor_control(sdflags=0x05)
-        else:
-            controls = None
-
+        controls = security_descriptor_control(sdflags=0x05) if query_sd else None
         # If we don't query the GC, don't accept an empty search base
         if search_base == "" and not use_gc:
             search_base = self.ad.baseDN
@@ -140,11 +135,7 @@ class ADDC(ADComputer):
             searcher = self.gcldap
         else:
             # If this request comes from the resolver thread, use that
-            if use_resolver:
-                searcher = self.resolverldap
-            else:
-                searcher = self.ldap
-
+            searcher = self.resolverldap if use_resolver else self.ldap
         sresult = searcher.extend.standard.paged_search(search_base,
                                                         search_filter,
                                                         attributes=attributes,
@@ -174,10 +165,7 @@ class ADDC(ADComputer):
             searcher = self.gcldap
         else:
             # If this request comes from the resolver thread, use that
-            if use_resolver:
-                searcher = self.resolverldap
-            else:
-                searcher = self.ldap
+            searcher = self.resolverldap if use_resolver else self.ldap
         if attributes is None or attributes == []:
             attributes = ALL_ATTRIBUTES
         try:
@@ -197,18 +185,26 @@ class ADDC(ADComputer):
             return e
 
     def get_domain_controllers(self):
-        entries = self.search('(userAccountControl:1.2.840.113556.1.4.803:=8192)',
-                              ['dnshostname', 'samaccounttype', 'samaccountname',
-                               'serviceprincipalname', 'objectSid'])
-
-        return entries
+        return self.search(
+            '(userAccountControl:1.2.840.113556.1.4.803:=8192)',
+            [
+                'dnshostname',
+                'samaccounttype',
+                'samaccountname',
+                'serviceprincipalname',
+                'objectSid',
+            ],
+        )
 
 
     def get_netbios_name(self, context):
         try:
-            entries = self.search('(ncname=%s)' % context,
-                                  ['nETBIOSName'],
-                                  search_base="CN=Partitions,%s" % self.ldap.server.info.other['configurationNamingContext'][0])
+            entries = self.search(
+                f'(ncname={context})',
+                ['nETBIOSName'],
+                search_base=f"CN=Partitions,{self.ldap.server.info.other['configurationNamingContext'][0]}",
+            )
+
         except (LDAPAttributeError, LDAPCursorError) as e:
             logging.warning('Could not determine NetBiosname of the domain: %s', str(e))
         return next(entries)
@@ -217,7 +213,7 @@ class ADDC(ADComputer):
         """
         Function to get objecttype GUID
         """
-        self.objecttype_guid_map = dict()
+        self.objecttype_guid_map = {}
 
         if self.ldap is None:
             self.ldap_connect()
@@ -277,10 +273,13 @@ class ADDC(ADComputer):
         This searches the configuration, which is present only once in the forest but is replicated
         to every DC.
         """
-        entries = self.search('(objectClass=crossRef)',
-                              ['nETBIOSName', 'systemFlags', 'nCName', 'name'],
-                              search_base="CN=Partitions,%s" % self.ldap.server.info.other['configurationNamingContext'][0],
-                              generator=True)
+        entries = self.search(
+            '(objectClass=crossRef)',
+            ['nETBIOSName', 'systemFlags', 'nCName', 'name'],
+            search_base=f"CN=Partitions,{self.ldap.server.info.other['configurationNamingContext'][0]}",
+            generator=True,
+        )
+
 
         entriesNum = 0
         for entry in entries:
@@ -312,11 +311,9 @@ class ADDC(ADComputer):
             properties += ['adminCount', 'description', 'whencreated']
         if acl:
             properties += ['nTSecurityDescriptor']
-        entries = self.search('(objectClass=group)',
-                              properties,
-                              generator=True,
-                              query_sd=acl)
-        return entries
+        return self.search(
+            '(objectClass=group)', properties, generator=True, query_sd=acl
+        )
 
 
     def get_users(self, include_properties=False, acl=False):
@@ -339,11 +336,7 @@ class ADDC(ADComputer):
         else:
             logging.debug('No support for GMSA, skipping in query')
             query = '(&(objectCategory=person)(objectClass=user))'
-        entries = self.search(query,
-                              properties,
-                              generator=True,
-                              query_sd=acl)
-        return entries
+        return self.search(query, properties, generator=True, query_sd=acl)
 
 
     def get_computers(self, include_properties=False, acl=False):
@@ -381,23 +374,38 @@ class ADDC(ADComputer):
         return entries
 
     def get_memberships(self):
-        entries = self.search('(|(memberof=*)(primarygroupid=*))',
-                              ['samaccountname', 'distinguishedname',
-                               'dnshostname', 'samaccounttype', 'primarygroupid',
-                               'memberof'],
-                              generator=False)
-        return entries
+        return self.search(
+            '(|(memberof=*)(primarygroupid=*))',
+            [
+                'samaccountname',
+                'distinguishedname',
+                'dnshostname',
+                'samaccounttype',
+                'primarygroupid',
+                'memberof',
+            ],
+            generator=False,
+        )
 
     def get_sessions(self):
-        entries = self.search('(&(samAccountType=805306368)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(|(homedirectory=*)(scriptpath=*)(profilepath=*)))',
-                              ['homedirectory', 'scriptpath', 'profilepath'])
-        return entries
+        return self.search(
+            '(&(samAccountType=805306368)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(|(homedirectory=*)(scriptpath=*)(profilepath=*)))',
+            ['homedirectory', 'scriptpath', 'profilepath'],
+        )
 
     def get_trusts(self):
-        entries = self.search('(objectClass=trustedDomain)',
-                              attributes=['flatName', 'name', 'securityIdentifier', 'trustAttributes', 'trustDirection', 'trustType'],
-                              generator=True)
-        return entries
+        return self.search(
+            '(objectClass=trustedDomain)',
+            attributes=[
+                'flatName',
+                'name',
+                'securityIdentifier',
+                'trustAttributes',
+                'trustDirection',
+                'trustType',
+            ],
+            generator=True,
+        )
 
     def prefetch_info(self, props=False, acls=False):
         self.get_objecttype()
@@ -462,16 +470,10 @@ class AD(object):
         self.has_laps = False
         # Does the schema have msDS-KeyCredentialLink
         self.has_keycredlink = False
-        if domain is not None:
-            self.baseDN = ADUtils.domain2ldap(domain)
-        else:
-            self.baseDN = None
+        self.baseDN = ADUtils.domain2ldap(domain) if domain is not None else None
 
     def realm(self):
-        if self.domain is not None:
-            return self.domain.upper()
-        else:
-            return None
+        return self.domain.upper() if self.domain is not None else None
 
     def override_dc(self, dcname):
         self._dcs = [dcname]
@@ -497,8 +499,8 @@ class AD(object):
         basequery = '_ldap._tcp.pdc._msdcs'
 
         if domain is not None:
-            logging.debug('Using domain hint: %s' % str(domain))
-            query = '_ldap._tcp.pdc._msdcs.%s' % domain
+            logging.debug(f'Using domain hint: {str(domain)}')
+            query = f'_ldap._tcp.pdc._msdcs.{domain}'
         else:
             # Assume a DNS search domain is (correctly) configured on the host
             # in which case the resolver will autocomplete our request
@@ -510,7 +512,7 @@ class AD(object):
 
             if str(q.qname).lower().startswith('_ldap._tcp.pdc._msdcs'):
                 ad_domain = str(q.qname).lower()[len(basequery):].strip('.')
-                logging.info('Found AD domain: %s' % ad_domain)
+                logging.info(f'Found AD domain: {ad_domain}')
 
                 self.domain = ad_domain
                 if self.auth.domain is None:
@@ -519,7 +521,7 @@ class AD(object):
 
             for r in q:
                 dc = str(r.target).rstrip('.')
-                logging.debug('Found primary DC: %s' % dc)
+                logging.debug(f'Found primary DC: {dc}')
                 if dc not in self._dcs:
                     self._dcs.append(dc)
 
@@ -530,7 +532,7 @@ class AD(object):
             q = self.dnsresolver.query(query.replace('pdc','gc'), 'SRV', tcp=self.dns_tcp)
             for r in q:
                 gc = str(r.target).rstrip('.')
-                logging.debug('Found Global Catalog server: %s' % gc)
+                logging.debug(f'Found Global Catalog server: {gc}')
                 if gc not in self._gcs:
                     self._gcs.append(gc)
 
@@ -549,7 +551,7 @@ class AD(object):
                 q = self.dnsresolver.query('_kerberos._tcp.dc._msdcs', 'SRV', tcp=self.dns_tcp)
                 for r in q:
                     kdc = str(r.target).rstrip('.')
-                    logging.debug('Found KDC: %s' % str(r.target).rstrip('.'))
+                    logging.debug(f"Found KDC: {str(r.target).rstrip('.')}")
                     if kdc not in self._kdcs:
                         self._kdcs.append(kdc)
                         self.auth.kdc = self._kdcs[0]
@@ -561,14 +563,19 @@ class AD(object):
 
     def get_domain_by_name(self, name):
         for domain, entry in iteritems(self.domains):
-            if 'name' in entry['attributes']:
-                if entry['attributes']['name'].upper() == name.upper():
-                    return entry
-        # Also try domains by NETBIOS definition
-        for domain, entry in iteritems(self.nbdomains):
-            if domain.upper() == name.upper():
+            if (
+                'name' in entry['attributes']
+                and entry['attributes']['name'].upper() == name.upper()
+            ):
                 return entry
-        return None
+        return next(
+            (
+                entry
+                for domain, entry in iteritems(self.nbdomains)
+                if domain.upper() == name.upper()
+            ),
+            None,
+        )
 
 """
 Active Directory Domain

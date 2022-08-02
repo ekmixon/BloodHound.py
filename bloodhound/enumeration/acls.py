@@ -66,7 +66,7 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
     if osid not in ignoresids:
         relations.append(build_relation(osid, 'Owns', inherited=False))
     for ace_object in sd.dacl.aces:
-        if ace_object.ace.AceType != 0x05 and ace_object.ace.AceType != 0x00:
+        if ace_object.ace.AceType not in [0x05, 0x00]:
             # These are the only two aces we care about currently
             logging.debug('Don\'t care about acetype %d', ace_object.ace.AceType)
             continue
@@ -83,11 +83,18 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
                 continue
 
             # Check if the ACE has restrictions on object type (inherited case)
-            if ace_object.has_flag(ACE.INHERITED_ACE) \
-                and ace_object.acedata.has_flag(ACCESS_ALLOWED_OBJECT_ACE.ACE_INHERITED_OBJECT_TYPE_PRESENT):
-                # Verify if the ACE applies to this object type
-                if not ace_applies(ace_object.acedata.get_inherited_object_type().lower(), entrytype, objecttype_guid_map):
-                    continue
+            if (
+                ace_object.has_flag(ACE.INHERITED_ACE)
+                and ace_object.acedata.has_flag(
+                    ACCESS_ALLOWED_OBJECT_ACE.ACE_INHERITED_OBJECT_TYPE_PRESENT
+                )
+                and not ace_applies(
+                    ace_object.acedata.get_inherited_object_type().lower(),
+                    entrytype,
+                    objecttype_guid_map,
+                )
+            ):
+                continue
 
             mask = ace_object.acedata.mask
             # Now the magic, we have to check all the rights BloodHound cares about
@@ -117,7 +124,7 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
                     relations.append(build_relation(sid, 'GenericWrite', inherited=is_inherited))
                     # Don't skip this if it's the domain object, since BloodHound reports duplicate
                     # rights as well, and this might influence some queries
-                    if entrytype != 'domain' and entrytype != 'computer':
+                    if entrytype not in ['domain', 'computer']:
                         continue
 
                 # These are specific bitmasks so don't break the loop from here
@@ -127,9 +134,9 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
                 if mask.has_priv(ACCESS_MASK.WRITE_OWNER):
                     relations.append(build_relation(sid, 'WriteOwner', inherited=is_inherited))
 
-            # Property write privileges
-            writeprivs = ace_object.acedata.mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_WRITE_PROP)
-            if writeprivs:
+            if writeprivs := ace_object.acedata.mask.has_priv(
+                ACCESS_MASK.ADS_RIGHT_DS_WRITE_PROP
+            ):
                 # GenericWrite
                 if entrytype in ['user', 'group', 'computer'] and not ace_object.acedata.has_flag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT):
                     relations.append(build_relation(sid, 'GenericWrite', inherited=is_inherited))
@@ -155,16 +162,23 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
                     relations.append(build_relation(sid, 'AddSelf', '', inherited=is_inherited))
 
             # Property read privileges
-            if ace_object.acedata.mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_READ_PROP):
-                if entrytype == 'computer' and \
-                ace_object.acedata.has_flag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT) and \
-                entry['Properties']['haslaps']:
-                    if ace_object.acedata.get_object_type().lower() == objecttype_guid_map['ms-mcs-admpwd']:
-                        relations.append(build_relation(sid, 'ReadLAPSPassword', inherited=is_inherited))
+            if (
+                ace_object.acedata.mask.has_priv(
+                    ACCESS_MASK.ADS_RIGHT_DS_READ_PROP
+                )
+                and entrytype == 'computer'
+                and ace_object.acedata.has_flag(
+                    ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT
+                )
+                and entry['Properties']['haslaps']
+                and ace_object.acedata.get_object_type().lower()
+                == objecttype_guid_map['ms-mcs-admpwd']
+            ):
+                relations.append(build_relation(sid, 'ReadLAPSPassword', inherited=is_inherited))
 
-            # Extended rights
-            control_access = ace_object.acedata.mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_CONTROL_ACCESS)
-            if control_access:
+            if control_access := ace_object.acedata.mask.has_priv(
+                ACCESS_MASK.ADS_RIGHT_DS_CONTROL_ACCESS
+            ):
                 # All Extended
                 if entrytype in ['user', 'domain'] and not ace_object.acedata.has_flag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT):
                     relations.append(build_relation(sid, 'AllExtendedRights', '', inherited=is_inherited))
@@ -197,7 +211,7 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
             # For users and domain, check extended rights
             if entrytype in ['user', 'domain'] and mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_CONTROL_ACCESS):
                 relations.append(build_relation(sid, 'AllExtendedRights', '', inherited=is_inherited))
-                
+
             if entrytype == 'computer' and mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_CONTROL_ACCESS) and \
             entry['Properties']['haslaps']:
                 relations.append(build_relation(sid, 'AllExtendedRights', '', inherited=is_inherited))
@@ -205,8 +219,6 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
             if mask.has_priv(ACCESS_MASK.WRITE_DACL):
                 relations.append(build_relation(sid, 'WriteDacl', inherited=is_inherited))
 
-    # pprint.pprint(entry)
-        # pprint.pprint(relations)
     return entry, relations
 
 def can_write_property(ace_object, binproperty):
@@ -219,13 +231,13 @@ def can_write_property(ace_object, binproperty):
     '''
     if not ace_object.acedata.mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_WRITE_PROP):
         return False
-    if not ace_object.acedata.has_flag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT):
-        # No ObjectType present - we have generic access on all properties
-        return True
-    # Both are binary here
-    if ace_object.acedata.data.ObjectType == binproperty:
-        return True
-    return False
+    return (
+        ace_object.acedata.data.ObjectType == binproperty
+        if ace_object.acedata.has_flag(
+            ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT
+        )
+        else True
+    )
 
 def has_extended_right(ace_object, binrightguid):
     '''
@@ -237,13 +249,13 @@ def has_extended_right(ace_object, binrightguid):
     '''
     if not ace_object.acedata.mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_CONTROL_ACCESS):
         return False
-    if not ace_object.acedata.has_flag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT):
-        # No ObjectType present - we have all extended rights
-        return True
-    # Both are binary here
-    if ace_object.acedata.data.ObjectType == binrightguid:
-        return True
-    return False
+    return (
+        ace_object.acedata.data.ObjectType == binrightguid
+        if ace_object.acedata.has_flag(
+            ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT
+        )
+        else True
+    )
 
 def ace_applies(ace_guid, object_class, objecttype_guid_map):
     '''
@@ -251,10 +263,7 @@ def ace_applies(ace_guid, object_class, objecttype_guid_map):
     Note that this function assumes you already verified that InheritedObjectType is set (via the flag).
     If this is not set, the ACE applies to all object types.
     '''
-    if ace_guid == objecttype_guid_map[object_class]:
-        return True
-    # If none of these match, the ACE does not apply to this object
-    return False
+    return ace_guid == objecttype_guid_map[object_class]
 
 def build_relation(sid, relation, acetype='', inherited=False):
     if acetype != '':
@@ -404,8 +413,7 @@ class ACL(object):
         self.aces = []
 
         buf = BytesIO(self.acl.Data)
-        for i in range(self.acl.AceCount):
-            self.aces.append(ACE(buf))
+        self.aces.extend(ACE(buf) for _ in range(self.acl.AceCount))
 
 
 class ACCESS_ALLOWED_ACE(object):
@@ -416,7 +424,7 @@ class ACCESS_ALLOWED_ACE(object):
         self.mask = ACCESS_MASK(self.data.Mask)
 
     def __repr__(self):
-        return "<ACCESS_ALLOWED_OBJECT_ACE Sid=%s Mask=%s>" % (str(self.sid), str(self.mask))
+        return f"<ACCESS_ALLOWED_OBJECT_ACE Sid={str(self.sid)} Mask={str(self.mask)}>"
 
 class ACCESS_DENIED_ACE(ACCESS_ALLOWED_ACE):
     pass
@@ -447,10 +455,14 @@ class ACCESS_ALLOWED_OBJECT_ACE(object):
         return None
 
     def __repr__(self):
-        out = []
-        for name, value in iteritems(vars(ACCESS_ALLOWED_OBJECT_ACE)):
-            if not name.startswith('_') and type(value) is int and self.has_flag(value):
-                out.append(name)
+        out = [
+            name
+            for name, value in iteritems(vars(ACCESS_ALLOWED_OBJECT_ACE))
+            if not name.startswith('_')
+            and type(value) is int
+            and self.has_flag(value)
+        ]
+
         data = (' | '.join(out),
                 str(self.sid),
                 str(self.mask),
@@ -515,10 +527,14 @@ class ACCESS_MASK(object):
         self.mask ^= priv
 
     def __repr__(self):
-        out = []
-        for name, value in iteritems(vars(ACCESS_MASK)):
-            if not name.startswith('_') and type(value) is int and self.has_priv(value):
-                out.append(name)
+        out = [
+            name
+            for name, value in iteritems(vars(ACCESS_MASK))
+            if not name.startswith('_')
+            and type(value) is int
+            and self.has_priv(value)
+        ]
+
         return "<ACCESS_MASK RawMask=%d Flags=%s>" % (self.mask, ' | '.join(out))
 
 
@@ -556,10 +572,14 @@ class ACE(object):
             self.mask = ACCESS_MASK(self.acedata.data.Mask)
 
     def __repr__(self):
-        out = []
-        for name, value in iteritems(vars(ACE)):
-            if not name.startswith('_') and type(value) is int and self.has_flag(value):
-                out.append(name)
+        out = [
+            name
+            for name, value in iteritems(vars(ACE))
+            if not name.startswith('_')
+            and type(value) is int
+            and self.has_flag(value)
+        ]
+
         return "<ACE Type=%s Flags=%s RawFlags=%d \n\tAce=%s>" % (self.ace.AceType, ' | '.join(out), self.ace.AceFlags, str(self.acedata))
 
     def has_flag(self, flag):

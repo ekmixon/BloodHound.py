@@ -190,7 +190,7 @@ class cstruct(object):
         """
         name = name.lower()
         if not replace and name.lower() in self.typedefs:
-            raise ValueError("Duplicate type: %s" % name)
+            raise ValueError(f"Duplicate type: {name}")
 
         self.typedefs[name] = t
 
@@ -258,16 +258,16 @@ class cstruct(object):
         if not isinstance(t, str):
             return t
 
-        for i in xrange(10):
+        for _ in xrange(10):
             if t.lower() not in self.typedefs:
-                raise ResolveError("Unknown type %s" % name)
+                raise ResolveError(f"Unknown type {name}")
 
             t = self.typedefs[t.lower()]
 
             if not isinstance(t, str):
                 return t
 
-        raise ResolveError("Recursion limit exceeded while resolving type %s" % name)
+        raise ResolveError(f"Recursion limit exceeded while resolving type {name}")
 
     def __getattr__(self, attr):
         if attr.lower() in self.typedefs:
@@ -276,7 +276,7 @@ class cstruct(object):
         if attr in self.consts:
             return self.consts[attr]
 
-        raise AttributeError("Invalid Attribute: %s" % attr)
+        raise AttributeError(f"Invalid Attribute: {attr}")
 
 
 class Parser(object):
@@ -348,11 +348,7 @@ class CStyleParser(Parser):
                     val = val.strip()
                     if not key:
                         continue
-                    if not val:
-                        val = nextval
-                    else:
-                        val = Expression(self.cstruct, val).evaluate({})
-
+                    val = Expression(self.cstruct, val).evaluate({}) if val else nextval
                     nextval = val + 1
 
                     values[key] = val
@@ -499,7 +495,7 @@ class Instance(object):
             self.__dict__['_type'].name,
             ', '.join(
                 [
-                    '%s=%s' % (k, hex(v) if isinstance(v, (int, long)) else repr(v))
+                    f'{k}={hex(v) if isinstance(v, (int, long)) else repr(v)}'
                     for k, v in self.__dict__['_values'].items()
                 ]
             ),
@@ -571,7 +567,7 @@ class Expression(object):
         self.expr = expr
 
     def evaluate(self, context=None):
-        context = context if context else {}
+        context = context or {}
         level = 0
         levels = []
         buf = ''
@@ -608,10 +604,7 @@ class Expression(object):
         if e.startswith('0x'):
             return int(e, 16)
 
-        if e in self.cstruct.consts:
-            return self.cstruct.consts[e]
-
-        return int(e)
+        return self.cstruct.consts[e] if e in self.cstruct.consts else int(e)
 
     def __repr__(self):
         return self.expr
@@ -679,7 +672,7 @@ class BaseType(object):
         raise NotImplementedError()
 
     def _read_array(self, stream, count):
-        return [self._read(stream) for i in xrange(count)]
+        return [self._read(stream) for _ in xrange(count)]
 
     def _read_0(self, stream):
         raise NotImplementedError()
@@ -688,10 +681,7 @@ class BaseType(object):
         raise NotImplementedError()
 
     def _write_array(self, stream, data):
-        num = 0
-        for i in data:
-            num += self._write(stream, i)
-        return num
+        return sum(self._write(stream, i) for i in data)
 
     def _write_0(self, stream, data):
         raise NotImplementedError()
@@ -708,7 +698,7 @@ class BaseType(object):
         return Array(self.cstruct, self, count)
 
     def __call__(self, *args, **kwargs):
-        if len(args) > 0:
+        if args:
             return self.read(*args, **kwargs)
 
         r = self.default()
@@ -731,10 +721,7 @@ class RawType(BaseType):
         return self.size
 
     def __repr__(self):
-        if self.name:
-            return self.name
-
-        return BaseType.__repr__(self)
+        return self.name or BaseType.__repr__(self)
 
 
 class Structure(BaseType):
@@ -744,7 +731,7 @@ class Structure(BaseType):
         self.name = name
         self.size = None
         self.lookup = OrderedDict()
-        self.fields = fields if fields else []
+        self.fields = fields or []
 
         for f in self.fields:
             self.lookup[f.name] = f
@@ -813,15 +800,14 @@ class Structure(BaseType):
             start = stream.tell()
             ft = self.cstruct.resolve(field.type)
 
-            if field.offset:
-                if start != struct_start + field.offset:
-                    log(
-                        "+ seeking to 0x{:x}+0x{:x} for {}".format(
-                            struct_start, field.offset, field.name
-                        )
+            if field.offset and start != struct_start + field.offset:
+                log(
+                    "+ seeking to 0x{:x}+0x{:x} for {}".format(
+                        struct_start, field.offset, field.name
                     )
-                    stream.seek(struct_start + field.offset)
-                    start = struct_start + field.offset
+                )
+                stream.seek(struct_start + field.offset)
+                start = struct_start + field.offset
 
             if field.bits:
                 r[field.name] = bitbuffer.read(ft, field.bits)
@@ -892,20 +878,16 @@ class Structure(BaseType):
         return self.size
 
     def __repr__(self):
-        return '<Structure {}>'.format(self.name)
+        return f'<Structure {self.name}>'
 
     def show(self, indent=0):
         """Pretty print this structure."""
         if indent == 0:
-            print("struct {}".format(self.name))
+            print(f"struct {self.name}")
 
         for field in self.fields:
-            if field.offset is None:
-                offset = '0x??'
-            else:
-                offset = '0x{:02x}'.format(field.offset)
-
-            print("{}+{} {} {}".format(' ' * indent, offset, field.name, field.type))
+            offset = '0x??' if field.offset is None else '0x{:02x}'.format(field.offset)
+            print(f"{' ' * indent}+{offset} {field.name} {field.type}")
 
             if isinstance(field.type, Structure):
                 field.type.show(indent + 1)
@@ -931,14 +913,12 @@ class BitBuffer(object):
         if self.endian != '>':
             v = self._buffer & ((1 << bits) - 1)
             self._buffer >>= bits
-            self._remaining -= bits
         else:
             v = self._buffer & (
                 ((1 << (self._remaining - bits)) - 1) ^ ((1 << self._remaining) - 1)
             )
             v >>= self._remaining - bits
-            self._remaining -= bits
-
+        self._remaining -= bits
         return v
 
     def write(self, field_type, data, bits):
@@ -975,7 +955,7 @@ class Field(object):
         self.offset = offset
 
     def __repr__(self):
-        return '<Field {} {}>'.format(self.name, self.type)
+        return f'<Field {self.name} {self.type}>'
 
 
 class Array(BaseType):
@@ -1000,11 +980,7 @@ class Array(BaseType):
         if self.count is None:
             return self.type._read_0(stream)
 
-        if self.dynamic:
-            count = self.count.evaluate(context)
-        else:
-            count = self.count
-
+        count = self.count.evaluate(context) if self.dynamic else self.count
         return self.type._read_array(stream, max(0, count))
 
     def _write(self, f, data):
@@ -1017,7 +993,7 @@ class Array(BaseType):
         if self.dynamic or self.count is None:
             return []
 
-        return [self.type.default() for i in xrange(self.count)]
+        return [self.type.default() for _ in xrange(self.count)]
 
     def __repr__(self):
         if self.count is None:
@@ -1091,10 +1067,7 @@ class CharType(RawType):
         return stream.read(1)
 
     def _read_array(self, stream, count):
-        if count == 0:
-            return b''
-
-        return stream.read(count)
+        return b'' if count == 0 else stream.read(count)
 
     def _read_0(self, stream):
         r = []
@@ -1296,10 +1269,7 @@ class Enum(RawType):
     def __init__(self, cstruct, name, type_, values):
         self.type = type_
         self.values = values
-        self.reverse = {}
-
-        for k, v in values.items():
-            self.reverse[v] = k
+        self.reverse = {v: k for k, v in values.items()}
 
         super(Enum, self).__init__(cstruct, name, len(self.type))
 
@@ -1357,7 +1327,7 @@ class EnumInstance(object):
     @property
     def name(self):
         if self.value not in self.enum.reverse:
-            return '{}_{}'.format(self.enum.name, self.value)
+            return f'{self.enum.name}_{self.value}'
         return self.enum.reverse[self.value]
 
     def __eq__(self, value):
@@ -1376,10 +1346,10 @@ class EnumInstance(object):
         return hash((self.enum, self.value))
 
     def __str__(self):
-        return '{}.{}'.format(self.enum.name, self.name)
+        return f'{self.enum.name}.{self.name}'
 
     def __repr__(self):
-        return '<{}.{}: {}>'.format(self.enum.name, self.name, self.value)
+        return f'<{self.enum.name}.{self.name}: {self.value}>'
 
 
 class Union(RawType):
@@ -1427,8 +1397,7 @@ def ctypes(structure):
         t = ctypes_type(field.type)
         fields.append((field.name, t))
 
-    tt = type(structure.name, (_ctypes.Structure, ), {"_fields_": fields})
-    return tt
+    return type(structure.name, (_ctypes.Structure, ), {"_fields_": fields})
 
 
 def ctypes_type(t):
@@ -1452,7 +1421,7 @@ def ctypes_type(t):
         subtype = ctypes_type(t._target)
         return ctypes.POINTER(subtype)
 
-    raise NotImplementedError("Type not implemented: %s" % t.__class__.__name__)
+    raise NotImplementedError(f"Type not implemented: {t.__class__.__name__}")
 
 
 class Compiler(object):
@@ -1479,13 +1448,10 @@ class Compiler(object):
         }
 
         exec(c, env)
-        sc = env[structure.name](self.cstruct, structure, source)
-
-        return sc
+        return env[structure.name](self.cstruct, structure, source)
 
     def gen_struct_class(self, structure):
         blocks = []
-        classes = []
         cur_block = []
         read_size = 0
         prev_was_bits = False
@@ -1506,7 +1472,7 @@ class Compiler(object):
                     BytesInteger,
                 ),
             ):
-                raise CompilerError("Unsupported type for compiler: {}".format(ft))
+                raise CompilerError(f"Unsupported type for compiler: {ft}")
 
             if isinstance(ft, Structure) or (
                 isinstance(ft, Array) and isinstance(ft.type, Structure)
@@ -1577,7 +1543,7 @@ class Compiler(object):
         read_code = '\n\n'.join(blocks)
         read_code = '\n'.join(['    ' * 2 + line for line in read_code.split('\n')])
 
-        classes.append(COMPILE_TEMPL.format(name=structure.name, read_code=read_code))
+        classes = [COMPILE_TEMPL.format(name=structure.name, read_code=read_code)]
         return '\n\n'.join(classes)
 
     def gen_read_block(self, size, block):
@@ -1619,24 +1585,18 @@ class Compiler(object):
                     t = self.cstruct.pointer
 
                 if isinstance(t, (CharType, WcharType, BytesInteger)):
-                    read_slice = '{}:{}'.format(
-                        buf_offset, buf_offset + (count * t.size)
-                    )
+                    read_slice = f'{buf_offset}:{buf_offset + count * t.size}'
                 else:
-                    read_slice = '{}:{}'.format(data_offset, data_offset + count)
+                    read_slice = f'{data_offset}:{data_offset + count}'
             elif isinstance(t, CharType):
                 read_slice = str(buf_offset)
             elif isinstance(t, (WcharType, BytesInteger)):
-                read_slice = '{}:{}'.format(buf_offset, buf_offset + t.size)
+                read_slice = f'{buf_offset}:{buf_offset + t.size}'
             else:
                 read_slice = str(data_offset)
 
             if not curtype:
-                if isinstance(t, PackedType):
-                    curtype = t.packchar
-                else:
-                    curtype = 'x'
-
+                curtype = t.packchar if isinstance(t, PackedType) else 'x'
             if isinstance(t, (PackedType, CharType, WcharType, BytesInteger, Enum)):
                 charcount = count
 
@@ -1648,7 +1608,7 @@ class Compiler(object):
                     packchar = t.packchar
 
                 if curtype != packchar:
-                    fmt.append('{}{}'.format(curcount, curtype))
+                    fmt.append(f'{curcount}{curtype}')
                     curcount = 0
 
                 curcount += charcount
@@ -1664,11 +1624,11 @@ class Compiler(object):
                     data_slice='[0]' if count == 1 else '',
                 )
             elif isinstance(t, (CharType, WcharType)):
-                getter = 'buf[{}]'.format(read_slice)
+                getter = f'buf[{read_slice}]'
                 if isinstance(t, WcharType):
                     getter += ".decode('utf-16-le' if self.cstruct.endian == '<' else 'utf-16-be')"
             else:
-                getter = 'data[{}]'.format(read_slice)
+                getter = f'data[{read_slice}]'
 
             if isinstance(ft, Enum):
                 getter = 'EnumInstance(self.cstruct.{type_name}, {getter})'.format(
@@ -1687,20 +1647,24 @@ class Compiler(object):
                     type_name=ft.type.name, getter=getter
                 )
             elif isinstance(ft, Array) and isinstance(t, PackedType):
-                getter = 'list({})'.format(getter)
+                getter = f'list({getter})'
 
-            readcode.append(
-                'r["{name}"] = {getter}'.format(name=field.name, getter=getter)
-            )
-            readcode.append(
-                'sizes["{name}"] = {size}'.format(name=field.name, size=count * t.size)
+            readcode.extend(
+                (
+                    'r["{name}"] = {getter}'.format(
+                        name=field.name, getter=getter
+                    ),
+                    'sizes["{name}"] = {size}'.format(
+                        name=field.name, size=count * t.size
+                    ),
+                )
             )
 
             data_offset += data_count
             buf_offset += count * t.size
 
         if curcount:
-            fmt.append('{}{}'.format(curcount, curtype))
+            fmt.append(f'{curcount}{curtype}')
 
         return templ.format(''.join(fmt), '\n'.join(readcode))
 
@@ -1813,12 +1777,11 @@ def hexdump(s, palette=None, offset=0, prefix=""):
                 p = c if c in PRINTABLE else "."
 
                 if active:
-                    vals += "{:02x}".format(ord(c))
                     chars.append(active + p + COLOR_NORMAL)
                 else:
-                    vals += "{:02x}".format(ord(c))
                     chars.append(p)
 
+                vals += "{:02x}".format(ord(c))
                 remaining -= 1
                 if remaining == 0:
                     active = None
@@ -1826,9 +1789,8 @@ def hexdump(s, palette=None, offset=0, prefix=""):
                     if palette is not None:
                         vals += COLOR_NORMAL
 
-                if j == 15:
-                    if palette is not None:
-                        vals += COLOR_NORMAL
+                if j == 15 and palette is not None:
+                    vals += COLOR_NORMAL
 
             vals += " "
 
@@ -1869,13 +1831,10 @@ def dumpstruct(t, data=None, offset=0):
         raise ValueError("Invalid arguments")
 
     palette = []
-    ci = 0
-    out = "struct {}".format(t.name) + ":\n"
-    for field in g._type.fields:
+    out = f"struct {t.name}" + ":\n"
+    for ci, field in enumerate(g._type.fields):
         fg, bg = colors[ci % len(colors)]
         palette.append((g._size(field.name), bg))
-        ci += 1
-
         v = getattr(g, field.name)
         if isinstance(v, str):
             v = repr(v)
@@ -1884,9 +1843,9 @@ def dumpstruct(t, data=None, offset=0):
         elif isinstance(v, list):
             v = pprint.pformat(v)
             if '\n' in v:
-                v = v.replace('\n', '\n{}'.format(' ' * (len(field.name) + 4)))
+                v = v.replace('\n', f"\n{' ' * (len(field.name) + 4)}")
 
-        out += "- {}{}{}: {}\n".format(fg, field.name, COLOR_NORMAL, v)
+        out += f"- {fg}{field.name}{COLOR_NORMAL}: {v}\n"
 
     print()
     hexdump(data, palette, offset=offset)

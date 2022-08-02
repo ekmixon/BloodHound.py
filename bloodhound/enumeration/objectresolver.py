@@ -43,14 +43,16 @@ class ObjectResolver(object):
         Returns a single LDAP entry
         """
         with self.lock:
-            if use_gc and not self.addc.gcldap:
-                if not self.addc.gc_connect():
-                    # Error connecting, bail
-                    return None
-            if not use_gc and not self.addc.resolverldap:
-                if not self.addc.ldap_connect(resolver=True):
-                    # Error connecting, bail
-                    return None
+            if use_gc and not self.addc.gcldap and not self.addc.gc_connect():
+                # Error connecting, bail
+                return None
+            if (
+                not use_gc
+                and not self.addc.resolverldap
+                and not self.addc.ldap_connect(resolver=True)
+            ):
+                # Error connecting, bail
+                return None
             if use_gc:
                 logging.debug('Querying GC for DN %s', distinguishedname)
             else:
@@ -67,21 +69,26 @@ class ObjectResolver(object):
         safename = escape_filter_chars(samname)
         with self.lock:
             if use_gc:
-                if not self.addc.gcldap:
-                    if not self.addc.gc_connect():
-                        # Error connecting, bail
-                        return None
+                if not self.addc.gcldap and not self.addc.gc_connect():
+                    # Error connecting, bail
+                    return None
                 logging.debug('Querying GC for SAM Name %s', samname)
             else:
                 logging.debug('Querying LDAP for SAM Name %s', samname)
-            entries = self.addc.search(search_base="",
-                                       search_filter='(sAMAccountName=%s)' % safename,
-                                       use_gc=use_gc,
-                                       attributes=['sAMAccountName', 'distinguishedName', 'sAMAccountType', 'objectSid'])
-            # This uses a generator, however we return a list
-            for entry in entries:
-                out.append(entry)
+            entries = self.addc.search(
+                search_base="",
+                search_filter=f'(sAMAccountName={safename})',
+                use_gc=use_gc,
+                attributes=[
+                    'sAMAccountName',
+                    'distinguishedName',
+                    'sAMAccountType',
+                    'objectSid',
+                ],
+            )
 
+            # This uses a generator, however we return a list
+            out.extend(iter(entries))
         return out
 
     def resolve_upn(self, upn):
@@ -91,15 +98,22 @@ class ObjectResolver(object):
         """
         safename = escape_filter_chars(upn)
         with self.lock:
-            if not self.addc.gcldap:
-                if not self.addc.gc_connect():
-                    # Error connecting, bail
-                    return None
+            if not self.addc.gcldap and not self.addc.gc_connect():
+                # Error connecting, bail
+                return None
             logging.debug('Querying GC for UPN %s', upn)
-            entries = self.addc.search(search_base="",
-                                       search_filter='(&(objectClass=user)(userPrincipalName=%s))' % safename,
-                                       use_gc=True,
-                                       attributes=['sAMAccountName', 'distinguishedName', 'sAMAccountType', 'objectSid'])
+            entries = self.addc.search(
+                search_base="",
+                search_filter=f'(&(objectClass=user)(userPrincipalName={safename}))',
+                use_gc=True,
+                attributes=[
+                    'sAMAccountName',
+                    'distinguishedName',
+                    'sAMAccountType',
+                    'objectSid',
+                ],
+            )
+
             for entry in entries:
                 # By definition this can be only one entry
                 return entry
@@ -110,25 +124,34 @@ class ObjectResolver(object):
         Returns a single LDAP entry
         """
         with self.lock:
-            if use_gc and not self.addc.gcldap:
-                if not self.addc.gc_connect():
-                    # Error connecting, bail
-                    return None
-            if not use_gc and not self.addc.resolverldap:
-                if not self.addc.ldap_connect(resolver=True):
-                    # Error connecting, bail
-                    return None
+            if use_gc and not self.addc.gcldap and not self.addc.gc_connect():
+                # Error connecting, bail
+                return None
+            if (
+                not use_gc
+                and not self.addc.resolverldap
+                and not self.addc.ldap_connect(resolver=True)
+            ):
+                # Error connecting, bail
+                return None
             if use_gc:
                 base = ""
                 logging.debug('Querying GC for SID %s', sid)
             else:
                 logging.debug('Querying resolver LDAP for SID %s', sid)
                 base = None
-            entries = self.addc.search(search_base=base,
-                                       search_filter='(objectSid=%s)' % sid,
-                                       use_gc=use_gc,
-                                       use_resolver=True,
-                                       attributes=['sAMAccountName', 'distinguishedName', 'sAMAccountType'])
+            entries = self.addc.search(
+                search_base=base,
+                search_filter=f'(objectSid={sid})',
+                use_gc=use_gc,
+                use_resolver=True,
+                attributes=[
+                    'sAMAccountName',
+                    'distinguishedName',
+                    'sAMAccountType',
+                ],
+            )
+
             for entry in entries:
                 return entry
 
@@ -144,8 +167,7 @@ class ObjectResolver(object):
         if entries is None:
             return
         if len(entries) > 0:
-            for entry in entries:
-                output.append(entry['attributes']['objectSid'])
+            output.extend(entry['attributes']['objectSid'] for entry in entries)
         else:
             logging.warning('Failed to resolve SAM name %s in current forest', samname)
         return output

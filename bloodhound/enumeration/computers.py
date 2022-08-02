@@ -64,19 +64,23 @@ class ComputerEnumerator(MembershipEnumerator):
         process_queue = queue.Queue()
 
         result_q = queue.Queue()
-        results_worker = threading.Thread(target=OutputWorker.write_worker, args=(result_q, timestamp + 'computers.json'))
+        results_worker = threading.Thread(
+            target=OutputWorker.write_worker,
+            args=(result_q, f'{timestamp}computers.json'),
+        )
+
         results_worker.daemon = True
         results_worker.start()
         logging.info('Starting computer enumeration with %d workers', num_workers)
         if len(computers) / num_workers > 500:
             logging.info('The workload seems to be rather large. Consider increasing the number of workers.')
-        for _ in range(0, num_workers):
+        for _ in range(num_workers):
             thread = threading.Thread(target=self.work, args=(process_queue, result_q))
             thread.daemon = True
             thread.start()
 
         for _, computer in iteritems(computers):
-            if not 'attributes' in computer:
+            if 'attributes' not in computer:
                 continue
 
             if 'dNSHostName' not in computer['attributes']:

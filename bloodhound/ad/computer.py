@@ -70,10 +70,7 @@ class ADComputer(object):
         # Did connecting to this host fail before?
         self.permanentfailure = False
         # Process invalid hosts
-        if not hostname:
-            self.hostname = '%s.%s' % (samname[:-1].upper(), self.ad.domain.upper())
-        else:
-            self.hostname = hostname
+        self.hostname = hostname or f'{samname[:-1].upper()}.{self.ad.domain.upper()}'
 
     def get_bloodhound_data(self, entry, collect, skip_acl=False):
         data = {
@@ -156,10 +153,10 @@ class ADComputer(object):
             props['serviceprincipalnames'] = ADUtils.get_entry_property(entry, 'servicePrincipalName', [])
             props['description'] = ADUtils.get_entry_property(entry, 'description')
             props['operatingsystem'] = ADUtils.get_entry_property(entry, 'operatingSystem')
-            # Add SP to OS if specified
-            servicepack = ADUtils.get_entry_property(entry, 'operatingSystemServicePack')
-            if servicepack:
-                props['operatingsystem'] = '%s %s' % (props['operatingsystem'], servicepack)
+            if servicepack := ADUtils.get_entry_property(
+                entry, 'operatingSystemServicePack'
+            ):
+                props['operatingsystem'] = f"{props['operatingsystem']} {servicepack}"
             props['sidhistory'] = [LDAP_SID(bsid).formatCanonical() for bsid in ADUtils.get_entry_property(entry, 'sIDHistory', [])]
             delegatehosts = ADUtils.get_entry_property(entry, 'msDS-AllowedToDelegateTo', [])
             for host in delegatehosts:
@@ -214,9 +211,8 @@ class ADComputer(object):
                 for r in q:
                     addr = r.address
 
-                if addr == None:
+                if addr is None:
                     return False
-            # Do exit properly on keyboardinterrupts
             except KeyboardInterrupt:
                 raise
             except Exception as e:
@@ -227,7 +223,7 @@ class ADComputer(object):
                     logging.warning('Could not resolve: %s: %s', self.hostname, e)
                 return False
 
-            logging.debug('Resolved: %s' % addr)
+            logging.debug(f'Resolved: {addr}')
 
             self.ad.dnscache.put(self.hostname, addr)
 
@@ -237,9 +233,7 @@ class ADComputer(object):
         # We ping the host here, this adds a small overhead for setting up an extra socket
         # but saves us from constructing RPC Objects for non-existing hosts. Also RPC over
         # SMB does not support setting a connection timeout, so we catch this here.
-        if ADUtils.tcp_ping(addr, 445) is False:
-            return False
-        return True
+        return ADUtils.tcp_ping(addr, 445) is not False
 
 
     def dce_rpc_connect(self, binding, uuid, integrity=False):
@@ -344,7 +338,10 @@ class ADComputer(object):
                 domain_entry = self.ad.get_domain_by_name(domain)
                 if domain_entry is not None:
                     domain = ADUtils.ldap2domain(domain_entry['attributes']['distinguishedName'])
-                logging.debug('Found logged on user at %s: %s@%s' % (self.hostname, record['wkui1_username'][:-1], domain))
+                logging.debug(
+                    f"Found logged on user at {self.hostname}: {record['wkui1_username'][:-1]}@{domain}"
+                )
+
                 loggedonusers.add((record['wkui1_username'][:-1], domain))
         except DCERPCException as e:
             if 'rpc_s_access_denied' in str(e):
@@ -375,13 +372,12 @@ class ADComputer(object):
         try:
             resp = srvs.hNetrSessionEnum(dce, '\x00', NULL, 10)
         except DCERPCException as e:
-            if 'rpc_s_access_denied' in str(e):
-                logging.debug('Access denied while enumerating Sessions on %s, likely a patched OS', self.hostname)
-                return []
-            else:
+            if 'rpc_s_access_denied' not in str(e):
                 raise
+            logging.debug('Access denied while enumerating Sessions on %s, likely a patched OS', self.hostname)
+            return []
         except Exception as e:
-            if str(e).find('Broken pipe') >= 0:
+            if 'Broken pipe' in str(e):
                 return
             else:
                 raise
@@ -413,7 +409,7 @@ class ADComputer(object):
             if ip[0] == '[' and ip[-1] == ']':
                 ip = ip[1:-1]
 
-            logging.info('User %s is logged in on %s from %s' % (userName, self.hostname, ip))
+            logging.info(f'User {userName} is logged in on {self.hostname} from {ip}')
 
             sessions.append({'user': userName, 'source': ip, 'target': self.hostname})
 
@@ -534,9 +530,7 @@ class ADComputer(object):
             for task in tasks:
                 try:
                     resp = tsch.hSchRpcRetrieveTask(dce, task)
-                    # This returns a tuple (sid, logontype) or None
-                    userinfo = ADUtils.parse_task_xml(resp['pXml'])
-                    if userinfo:
+                    if userinfo := ADUtils.parse_task_xml(resp['pXml']):
                         if userinfo[1] == u'Password':
                             # Convert to byte string because our cache format is in bytes
                             schtaskusers.append(str(userinfo[0]))
@@ -655,7 +649,7 @@ class ADComputer(object):
         try:
             resp = lsad.hLsarOpenPolicy2(dce, lsat.POLICY_LOOKUP_NAMES | MAXIMUM_ALLOWED)
         except Exception as e:
-            if str(e).find('Broken pipe') >= 0:
+            if 'Broken pipe' in str(e):
                 return
             else:
                 raise
@@ -670,20 +664,17 @@ class ADComputer(object):
             try:
                 resp = lsat.hLsarLookupSids(dce, policyHandle, [sid_string], lsat.LSAP_LOOKUP_LEVEL.enumItems.LsapLookupWksta)
             except DCERPCException as e:
-                if str(e).find('STATUS_NONE_MAPPED') >= 0:
+                if 'STATUS_NONE_MAPPED' in str(e):
                     logging.warning('SID %s lookup failed, return status: STATUS_NONE_MAPPED', sid_string)
                     # Try next SID
                     continue
-                elif str(e).find('STATUS_SOME_NOT_MAPPED') >= 0:
+                elif 'STATUS_SOME_NOT_MAPPED' in str(e):
                     # Not all could be resolved, work with the ones that could
                     resp = e.get_packet()
                 else:
                     raise
 
-            domains = []
-            for entry in resp['ReferencedDomains']['Domains']:
-                domains.append(entry['Name'])
-
+            domains = [entry['Name'] for entry in resp['ReferencedDomains']['Domains']]
             for entry in resp['TranslatedNames']['Names']:
                 domain = domains[entry['DomainIndex']]
                 domain_entry = self.ad.get_domain_by_name(domain)

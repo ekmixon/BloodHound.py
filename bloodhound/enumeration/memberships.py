@@ -147,7 +147,7 @@ class MembershipEnumerator(object):
         props['sfupassword'] = None
 
     def enumerate_users(self, timestamp=""):
-        filename = timestamp + 'users.json'
+        filename = f'{timestamp}users.json'
 
         # Should we include extra properties in the query?
         with_properties = 'objectprops' in self.collect
@@ -238,9 +238,7 @@ class MembershipEnumerator(object):
         if acl and not self.disable_pooling:
             self.aclenumerator.pool.close()
             self.aclenumerator.pool.join()
-            self.result_q.put(None)
-        else:
-            self.result_q.put(None)
+        self.result_q.put(None)
         self.result_q.join()
 
         logging.debug('Finished writing users')
@@ -252,15 +250,13 @@ class MembershipEnumerator(object):
         def is_highvalue(sid):
             if sid.endswith("-512") or sid.endswith("-516") or sid.endswith("-519") or sid.endswith("-520"):
                 return True
-            if sid in highvalue:
-                return True
-            return False
+            return sid in highvalue
 
         # Should we include extra properties in the query?
         with_properties = 'objectprops' in self.collect
         acl = 'acl' in self.collect
 
-        filename = timestamp + 'groups.json'
+        filename = f'{timestamp}groups.json'
         entries = self.addc.get_groups(include_properties=with_properties, acl=acl)
 
         logging.debug('Writing groups to file: %s', filename)
@@ -297,7 +293,7 @@ class MembershipEnumerator(object):
             }
             if sid in ADUtils.WELLKNOWN_SIDS:
                 # Prefix it with the domain
-                group['ObjectIdentifier'] = '%s-%s' % (self.addomain.domain.upper(), sid)
+                group['ObjectIdentifier'] = f'{self.addomain.domain.upper()}-{sid}'
             if with_properties:
                 group['Properties']['admincount'] = ADUtils.get_entry_property(entry, 'adminCount', default=0) == 1
                 group['Properties']['description'] = ADUtils.get_entry_property(entry, 'description')
@@ -342,7 +338,7 @@ class MembershipEnumerator(object):
         Enumerate computer objects. This function is only used if no
         collection was requested that required connecting to computers anyway.
         '''
-        filename = timestamp + 'computers.json'
+        filename = f'{timestamp}computers.json'
 
         acl = 'acl' in self.collect
         entries = self.addc.ad.computers.values()
@@ -360,7 +356,7 @@ class MembershipEnumerator(object):
 
         # This loops over the cached entries
         for entry in entries:
-            if not 'attributes' in entry:
+            if 'attributes' not in entry:
                 continue
 
             if 'dNSHostName' not in entry['attributes']:
@@ -394,9 +390,7 @@ class MembershipEnumerator(object):
         if acl and not self.disable_pooling:
             self.aclenumerator.pool.close()
             self.aclenumerator.pool.join()
-            self.result_q.put(None)
-        else:
-            self.result_q.put(None)
+        self.result_q.put(None)
         self.result_q.join()
 
         logging.debug('Finished writing computers')
@@ -432,12 +426,12 @@ class MembershipEnumerator(object):
 
         user = {
             "AllowedToDelegate": [],
-            "ObjectIdentifier": "%s-S-1-5-20" % domainname,
+            "ObjectIdentifier": f"{domainname}-S-1-5-20",
             "PrimaryGroupSID": None,
             "Properties": {
                 "domain": domainname,
                 "domainsid": self.addomain.domain_object.sid,
-                "name": "NT AUTHORITY@%s" % domainname,
+                "name": f"NT AUTHORITY@{domainname}",
             },
             "Aces": [],
             "SPNTargets": [],
@@ -445,6 +439,7 @@ class MembershipEnumerator(object):
             "IsDeleted": False,
             "IsACLProtected": False,
         }
+
         self.result_q.put(user)
 
 
@@ -460,14 +455,15 @@ class MembershipEnumerator(object):
         group = {
             "IsDeleted": False,
             "IsACLProtected": False,
-            "ObjectIdentifier": "%s-S-1-5-9" % rootdomain,
+            "ObjectIdentifier": f"{rootdomain}-S-1-5-9",
             "Properties": {
                 "domain": rootdomain.upper(),
-                "name": "ENTERPRISE DOMAIN CONTROLLERS@%s" % rootdomain,
+                "name": f"ENTERPRISE DOMAIN CONTROLLERS@{rootdomain}",
             },
             "Members": [],
-            "Aces": []
+            "Aces": [],
         }
+
         for entry in entries:
             resolved_entry = ADUtils.resolve_ad_entry(entry)
             memberdata = {
@@ -484,45 +480,48 @@ class MembershipEnumerator(object):
         evgroup = {
             "IsDeleted": False,
             "IsACLProtected": False,
-            "ObjectIdentifier": "%s-S-1-1-0" % domainname,
+            "ObjectIdentifier": f"{domainname}-S-1-1-0",
             "Properties": {
                 "domain": domainname,
                 "domainsid": self.addomain.domain_object.sid,
-                "name": "EVERYONE@%s" % domainname,
+                "name": f"EVERYONE@{domainname}",
             },
             "Members": [],
-            "Aces": []
+            "Aces": [],
         }
+
         self.result_q.put(evgroup)
 
         # Authenticated users
         augroup = {
             "IsDeleted": False,
             "IsACLProtected": False,
-            "ObjectIdentifier": "%s-S-1-5-11" % domainname,
+            "ObjectIdentifier": f"{domainname}-S-1-5-11",
             "Properties": {
                 "domain": domainname,
                 "domainsid": self.addomain.domain_object.sid,
-                "name": "AUTHENTICATED USERS@%s" % domainname,
+                "name": f"AUTHENTICATED USERS@{domainname}",
             },
             "Members": [],
-            "Aces": []
+            "Aces": [],
         }
+
         self.result_q.put(augroup)
 
         # Interactive
         iugroup = {
             "IsDeleted": False,
             "IsACLProtected": False,
-            "ObjectIdentifier": "%s-S-1-5-4" % domainname,
+            "ObjectIdentifier": f"{domainname}-S-1-5-4",
             "Properties": {
                 "domain": domainname,
                 "domainsid": self.addomain.domain_object.sid,
-                "name": "INTERACTIVE@%s" % domainname,
+                "name": f"INTERACTIVE@{domainname}",
             },
             "Members": [],
-            "Aces": []
+            "Aces": [],
         }
+
         self.result_q.put(iugroup)
 
 
@@ -532,8 +531,10 @@ class MembershipEnumerator(object):
         """
         self.enumerate_users(timestamp)
         self.enumerate_groups(timestamp)
-        if not ('localadmin' in self.collect
-                or 'session' in self.collect
-                or 'loggedon' in self.collect
-                or 'experimental' in self.collect):
+        if (
+            'localadmin' not in self.collect
+            and 'session' not in self.collect
+            and 'loggedon' not in self.collect
+            and 'experimental' not in self.collect
+        ):
             self.enumerate_computers_dconly(timestamp)

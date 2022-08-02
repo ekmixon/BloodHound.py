@@ -121,9 +121,9 @@ def resolve_collection_methods(methods):
     all_methods = ['group', 'localadmin', 'session', 'trusts', 'objectprops', 'acl', 'dcom', 'rdp', 'psremote']
     # DC only, does not collect to computers
     dconly_methods = ['group', 'trusts', 'objectprops', 'acl']
+    validated_methods = []
     if ',' in methods:
         method_list = [method.lower() for method in methods.split(',')]
-        validated_methods = []
         for method in method_list:
             if method not in valid_methods:
                 logging.error('Invalid collection method specified: %s', method)
@@ -139,7 +139,6 @@ def resolve_collection_methods(methods):
                 validated_methods.append(method)
         return set(validated_methods)
     else:
-        validated_methods = []
         # It is only one
         method = methods.lower()
         if method in valid_methods:
@@ -250,13 +249,13 @@ def main():
     elif args.username is not None and args.password is not None:
         logging.debug('Authentication: username/password')
         auth = ADAuthentication(username=args.username, password=args.password, domain=args.domain)
-    elif args.username is not None and args.password is None and args.hashes is None:
+    elif args.username is not None and args.hashes is None:
         args.password = getpass.getpass()
         auth = ADAuthentication(username=args.username, password=args.password, domain=args.domain)
     elif args.username is None and (args.password is not None or args.hashes is not None):
         logging.error('Authentication: password or hashes provided without username')
         sys.exit(1)
-    elif args.hashes is not None and args.username is not None:
+    elif args.hashes is not None:
         logging.debug('Authentication: NTLM hashes')
         lm, nt = args.hashes.split(":")
         auth = ADAuthentication(lm_hash=lm, nt_hash=nt, username=args.username, domain=args.domain)
@@ -298,13 +297,13 @@ def main():
                    num_workers=args.workers,
                    disable_pooling=args.disable_pooling,
                    timestamp=timestamp)
-    #If args --zip is true, the compress output  
+    #If args --zip is true, the compress output
     if args.zip:
-        logging.info("Compressing output into " + timestamp + "bloodhound.zip")
+        logging.info(f"Compressing output into {timestamp}bloodhound.zip")
         # Get a list of files in the current dir
         list_of_files = os.listdir(os.getcwd())
         # Create handle to zip file with timestamp prefix
-        with ZipFile(timestamp + "bloodhound.zip",'w') as zip:
+        with ZipFile(f"{timestamp}bloodhound.zip", 'w') as zip:
             # For each of those files we fetched
             for each_file in list_of_files:
                 # If the files starts with the current timestamp and ends in json

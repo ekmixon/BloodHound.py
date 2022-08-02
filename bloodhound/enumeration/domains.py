@@ -51,16 +51,12 @@ class DomainEnumerator(object):
         Dump trusts. This is currently the only domain info we support, so
         this function handles the entire domain dumping.
         """
-        if 'trusts' in collect:
-            entries = self.addc.get_trusts()
-        else:
-            entries = []
-
+        entries = self.addc.get_trusts() if 'trusts' in collect else []
         try:
-            logging.debug('Opening file for writing: %s' % filename)
+            logging.debug(f'Opening file for writing: {filename}')
             out = codecs.open(filename, 'w', 'utf-8')
         except:
-            logging.warning('Could not write file: %s' % filename)
+            logging.warning(f'Could not write file: {filename}')
             return
 
         # If the logging level is DEBUG, we ident the objects

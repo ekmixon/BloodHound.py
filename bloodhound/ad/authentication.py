@@ -48,15 +48,15 @@ class ADAuthentication(object):
             # Global Catalog connection
             if protocol == 'ldaps':
                 # Ldap SSL
-                server = Server("%s://%s:3269" % (protocol, hostname), get_info=ALL)
+                server = Server(f"{protocol}://{hostname}:3269", get_info=ALL)
             else:
                 # Plain LDAP
-                server = Server("%s://%s:3268" % (protocol, hostname), get_info=ALL)
+                server = Server(f"{protocol}://{hostname}:3268", get_info=ALL)
         else:
-            server = Server("%s://%s" % (protocol, hostname), get_info=ALL)
+            server = Server(f"{protocol}://{hostname}", get_info=ALL)
         # ldap3 supports auth with the NT hash. LM hash is actually ignored since only NTLMv2 is used.
         if self.nt_hash != '':
-            ldappass = self.lm_hash + ':' + self.nt_hash
+            ldappass = f'{self.lm_hash}:{self.nt_hash}'
         else:
             ldappass = self.password
         ldaplogin = '%s\\%s' % (self.domain, self.username)
@@ -82,6 +82,6 @@ class ADAuthentication(object):
                                     'Trying to connect over LDAPS instead...')
                     return self.getLDAPConnection(hostname, baseDN, 'ldaps')
                 else:
-                    logging.error('Failure to authenticate with LDAP! Error %s' % result['message'])
+                    logging.error(f"Failure to authenticate with LDAP! Error {result['message']}")
                     return None
         return conn
